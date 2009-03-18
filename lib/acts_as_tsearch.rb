@@ -181,7 +181,7 @@ module TsearchMixin
           end
           
           #add vector condition
-          where_part = "#{table_name}.#{tsearch_options[:vector]} @@ tsearch_query"
+          where_part = "#{table_name}.#{tsearch_options[:vector]} @@ to_tsquery('#{search_string}')"
           if options[:conditions] and options[:conditions].is_a? String
             options[:conditions] << " and #{where_part}"
           elsif options[:conditions] and options[:conditions].is_a? Array
@@ -199,7 +199,7 @@ module TsearchMixin
           end
           
           #finally - return results
-          find(:all, options)
+          scoped(options)
           # find(:all,
           #   :select => "#{table_name}.*, rank_cd(blogger_groups.vectors, query) as rank",
           #   :from => "#{table_name}, to_tsquery('default','#{search_string}') as query",

@@ -18,11 +18,9 @@ module TsearchMixin
         end
 
         def acts_as_tsearch(options = {})
-          logger.info "acts_as_tsearch: Configuring model #{human_name()}"
           # check for table existence
           begin
-            logger.info "acts_as_tsearch: Trying to access table #{table_name()}"
-            column_names()
+             column_names()
           rescue Exception => e
             logger.error "acts_as_tsearch: Table #{table_name()} for Model #{human_name()} could not be accessed. Is the database configured?"
             return false

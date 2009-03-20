@@ -18,6 +18,16 @@ module TsearchMixin
         end
 
         def acts_as_tsearch(options = {})
+          logger.info "acts_as_tsearch: Configuring model #{human_name()}"
+          # check for table existence
+          begin
+            logger.info "acts_as_tsearch: Trying to access table #{table_name()}"
+            column_names()
+          rescue Exception => e
+            logger.error "acts_as_tsearch: Table #{table_name()} for Model #{human_name()} could not be accessed. Is the database configured?"
+            return false
+          end
+          
           default_config = {:locale => "default", :auto_update_index => true}
           @tsearch_config = {}
           if !options.is_a?(Hash)

@@ -1,0 +1,28 @@
+= ActsAsTsearch
+
+Fork of acts_as_tsearch http://code.google.com/p/acts-as-tsearch/ with a few changes:
+
+* Return scope instead of collections, so that a search can be combined with existing scopes, will_paginate and most of all, enable lazy loading
+* Check for table existence, to prevent problems with rake db:create/db:drop et. al
+
+== Requirements
+
+* Postgres version >= 8.3
+* Rails version >= 2.0
+
+== Quick Start
+
+* Preparing your PostgreSQL database
+
+Add a text search configuration 'default':
+
+  CREATE TEXT SEARCH CONFIGURATION public.default ( COPY = pg_catalog.english )
+
+
+=== Do a search
+
+  blog_entries = BlogEntry.find_by_tsearch("bob")
+  puts blog_entries.tsearch_rank
+  puts blog_entries.size
+  puts blog_entries[0].title
+  ...etc...

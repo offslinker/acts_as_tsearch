@@ -145,104 +145,35 @@ module TsearchMixin
         #TODO:  Not sure how to handle order... current we add to it if it exists but this might not
         #be the right thing to do
         def find_by_tsearch(search_string, options = nil, tsearch_options = nil)
-          raise ActiveRecord::RecordNotFound, "Couldn't find #{name} without a search string" if search_string.nil? || search_string.empty?
+          raise ActiveRecord::RecordNotFound, "Couldn't find #{name} without a search string" if search_string.blank?
 
-          options = {} if options.nil?
-          tsearch_options = {} if tsearch_options.nil?
-          #assume vector column is named "vectors" unless otherwise specified
-          tsearch_options[:vector] = "vectors" unless tsearch_options.keys.include?(:vector)
-          raise "Vector [#{tsearch_options[:vector].intern}] not found 
-                  in acts_as_tsearch config: #{tsearch_config.to_yaml}
-                  " if !tsearch_config.keys.include?(tsearch_options[:vector].intern)
-          tsearch_options[:fix_query] = true if tsearch_options[:fix_query].nil?
+          options ||= {} 
+          tsearch_options ||= {} 
+          
+          tsearch_options[:vector] ||= "vectors"
+          ensure_tsearch_vector_column_exists!(tsearch_options)
+
+          search_string = fix_tsearch_query(search_string) if (tsearch_options[:fix_query].nil? || tsearch_options[:fix_query] == true)
 
           locale = tsearch_config[tsearch_options[:vector].intern][:locale]
           check_for_vector_column(tsearch_options[:vector])
-          
-          search_string = fix_tsearch_query(search_string) if tsearch_options[:fix_query] == true
-          
-          #add tsearch_rank to fields returned
+                 
+          # define tsearch rank function
           tsearch_rank_function = "ts_rank_cd(#{table_name}.#{tsearch_options[:vector]},tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
-
-          select_part = "#{tsearch_rank_function} as tsearch_rank"
-          if options[:select]
-            if options[:select].downcase != "count(*)"
-              options[:select] << ", #{select_part}"
-            end
-          else
-            options[:select] = "#{table_name}.*, #{select_part}"
-          end
-#options[:select] << " o w w e"          
-          #add headlines
-          if tsearch_options[:headlines]
-            tsearch_options[:headlines].each do |h|
-              options[:select] << ", ts_headline(#{table_name}.#{h},tsearch_query) as #{h}_headline"
-            end
-          end
+          add_tsearch_rank_to_select!(options, tsearch_rank_function)
+          add_tsearch_rank_to_order!(options, tsearch_rank_function)
+          add_tsearch_headlines_to_select!(options, tsearch_options)
+          add_tsearch_query_string_to_from!(options, search_string)
+          add_tsearch_vector_to_conditions!(options, tsearch_options, search_string)
           
-          #add tsearch_query to from
-          from_part = "to_tsquery('#{search_string}') as tsearch_query"
-          if options[:from]
-            options[:from] = "#{from_part}, #{options[:from]}"
-          else
-            options[:from] = "#{from_part}, #{table_name}"
-          end
-          
-          #add vector condition
-          where_part = "#{table_name}.#{tsearch_options[:vector]} @@ tsearch_query"
-          options[:conditions] = merge_conditions(options[:conditions], where_part)
-          order_part = "tsearch_rank desc"
-          if !options[:order]
-            # Note if the :include option to ActiveRecord::Base.find is used, the :select option is ignored
-            # (in ActiveRecord::Associations.construct_finder_sql_with_included_associations),
-            # so the 'tsearch_rank' function def above doesn't make it into the generated SQL, and the order
-            # by tsearch_rank fails. So we have to provide that function here, in the order_by clause.
-            options[:order] = (options.has_key?(:include) ? "#{tsearch_rank_function} desc" : order_part)
-          end
-          options
-        end
-          
-        #Finds a tsearch2 formated query in the tables vector column and adds
-        #tsearch_rank to the results
-        #
-        #Inputs:
-        #   search_string:  just about anything.  If you want to run a tsearch styled query 
-        #                   (see http://mira.sai.msu.su/~megera/pgsql/ftsdoc/fts-query.html for 
-        #                   details on this) just set fix_query = false.  
-        #
-        #   options: standard ActiveRecord find options - see http://api.rubyonrails.com/classes/ActiveRecord/Base.html#M000989
-        #
-        #   headlines:  TSearch2 can generate snippets of text with words found highlighted.  Put in the column names 
-        #               of any of the columns in your vector and they'll come back as "{column_name}_headline"
-        #               These are pretty expensive to generate - so only use them if you need them.
-        #               example:  pass this [%w{title description}]
-        #                         get back this result.title_headline, result.description_headline
-        #
-        #   fix_query:  the default will automatically try to fix your query with the fix_tsearch_query function
-        #
-        #   locals:  TODO:  Document this... see
-        #                  http://www.sai.msu.su/~megera/postgres/gist/tsearch/V2/docs/tsearch-V2-intro.html for details
-        #
-        def find_by_tsearch(search_string, options = nil, tsearch_options = nil)
-          options = find_by_tsearch_options(search_string, options, tsearch_options)
-          find(:all, options)
-          # find(:all,
-          #   :select => "#{table_name}.*, rank_cd(blogger_groups.vectors, query) as rank",
+          # Return find options as a query scope, rather than a find(:all).  The options look like this:
+          #   :select => "#{table_name}.*, ts_rank_cd(blogger_groups.vectors, query) as tsearch_rank",
           #   :from => "#{table_name}, to_tsquery('default','#{search_string}') as query",
           #   :conditions => "#{table_name}.vectors @@ query",
-          #   :order => "rank_cd(#{table_name}.vectors, query)",
-          #   :limit => 100)
-        end
-        
-        # Return a scope instead of an array. This has several advantages:
-        # * We can combine it with other named scopes
-        # * It loads lazy
-        # * Pagination with will_paginate can be calculated on db layer and not on a collection
-        def scoped_by_tsearch(search_string, options = nil, tsearch_options = nil)
-          options = find_by_tsearch_options(search_string, options, tsearch_options)
+          #   :order => "tsearch_rank"
           scoped(options)
         end
-        
+
         def count_by_tsearch(search_string, options = {}, tsearch_options = {})
             options[:select] = "count(*)"
             options[:order] = "1 desc"
@@ -412,6 +343,63 @@ module TsearchMixin
             res << "coalesce(#{f},'')"
           end
           return res.join(" || ' ' || ")        
+        end
+        
+        
+        private
+        
+        
+        ### Query formatting helpers
+        
+        # Raises an exception if table doesn't include a text search vector column
+        def ensure_tsearch_vector_column_exists!(tsearch_options)
+          unless tsearch_config.keys.include?(tsearch_options[:vector].intern)
+            raise "Vector [#{tsearch_options[:vector].intern}] not found in acts_as_tsearch config: #{tsearch_config.to_yaml}" 
+          end
+        end
+        
+        def add_tsearch_rank_to_select!(options, tsearch_rank_function)
+          select_part = "#{tsearch_rank_function} as tsearch_rank"
+          if options[:select]
+            if options[:select].downcase != "count(*)"
+              options[:select] << ", #{select_part}"
+            end
+          else
+            options[:select] = "#{table_name}.*, #{select_part}"
+          end
+        end    
+        
+        def add_tsearch_rank_to_order!(options, tsearch_rank_function)
+          order_part = "tsearch_rank desc"
+          if !options[:order]
+            # Note if the :include option to ActiveRecord::Base.find is used, the :select option is ignored
+            # (in ActiveRecord::Associations.construct_finder_sql_with_included_associations),
+            # so the 'tsearch_rank' function def above doesn't make it into the generated SQL, and the order
+            # by tsearch_rank fails. So we have to provide that function here, in the order_by clause.
+            options[:order] = (options.has_key?(:include) ? tsearch_rank_function : order_part)
+          end
+        end
+        
+        def add_tsearch_headlines_to_select!(options, tsearch_options)
+          if tsearch_options[:headlines]
+            tsearch_options[:headlines].each do |h|
+              options[:select] << ", ts_headline(#{table_name}.#{h},tsearch_query) as #{h}_headline"
+            end
+          end
+        end
+        
+        def add_tsearch_query_string_to_from!(options, search_string)     
+          from_part = "to_tsquery('#{search_string}') as tsearch_query"
+          if options[:from]
+            options[:from] = "#{from_part}, #{options[:from]}"
+          else
+            options[:from] = "#{from_part}, #{table_name}"
+          end
+        end
+        
+        def add_tsearch_vector_to_conditions!(options, tsearch_options, search_string)
+          where_part = "#{table_name}.#{tsearch_options[:vector]} @@ tsearch_query"
+          options[:conditions] = merge_conditions(options[:conditions], where_part)
         end
 
       end

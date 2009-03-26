@@ -13,9 +13,6 @@ module TsearchMixin
       # will load the relevant instance methods
       # defined below when invoked
       module ClassMethods
-        def tsearch_config
-          @tsearch_config
-        end
 
         def acts_as_tsearch(options = {})
           # check for table existence
@@ -27,7 +24,7 @@ module TsearchMixin
           end
           
           default_config = {:locale => "default", :auto_update_index => true}
-          @tsearch_config = {}
+          tsearch_config = {}
           if !options.is_a?(Hash)
             raise "Missing required fields for acts_as_tsearch.  At a bare minimum you need :fields => 'SomeFileName'.  Please see
             documentation on http://acts-as-tsearch.rubyforge.org"
@@ -36,22 +33,22 @@ module TsearchMixin
             #they passed in :fields => "somefield" or :fields => [:one, :two, :three]
             #:fields => "somefield"
             if options[:fields].is_a?(String)
-              @tsearch_config = {:vectors => default_config.clone}
-              @tsearch_config[:vectors][:fields] = 
+              tsearch_config = {:vectors => default_config.clone}
+              tsearch_config[:vectors][:fields] = 
                 {"a" => {:columns => [options[:fields]], :weight => 1.0}}
               fields << options[:fields]
             #:fields => [:one, :two]
             elsif options[:fields].is_a?(Array)
-              @tsearch_config = {:vectors => default_config.clone}
-              @tsearch_config[:vectors][:fields] = 
+              tsearch_config = {:vectors => default_config.clone}
+              tsearch_config[:vectors][:fields] = 
                 {"a" => {:columns => options[:fields], :weight => 1.0}}
               fields = options[:fields]
             # :fields => {"a" => {:columns => [:one, :two], :weight => 1},
             #              "b" => {:colums => [:three, :four], :weight => 0.5}
             #              }
             elsif options[:fields].is_a?(Hash)
-              @tsearch_config = {:vectors => default_config.clone}
-              @tsearch_config[:vectors][:fields] = options[:fields]
+              tsearch_config = {:vectors => default_config.clone}
+              tsearch_config[:vectors][:fields] = options[:fields]
               options[:fields].keys.each do |k|
                 options[:fields][k][:columns].each do |f|
                   fields << f
@@ -63,8 +60,8 @@ module TsearchMixin
               #   :fields => [:title, :description]
               # }
               options.keys.each do |k|
-                @tsearch_config[k] = default_config.clone
-                @tsearch_config[k].update(options[k])
+                tsearch_config[k] = default_config.clone
+                tsearch_config[k].update(options[k])
                 if options[k][:fields].is_a?(String)
                   fields << options[k][:fields]
                 elsif options[k][:fields].is_a?(Array)
@@ -79,9 +76,14 @@ module TsearchMixin
                   end
                 end
                 #TODO: add error checking here for complex fields - right know - assume it's correct
-                #puts k.to_s + " yamled = " + @tsearch_config.to_yaml
+                #puts k.to_s + " yamled = " + tsearch_config.to_yaml
               end
             end
+            
+            # Define tsearch_config as a class inheritable attribute, so that
+            # subclasses inherit it and can optionally override it.
+            write_inheritable_attribute :tsearch_config, tsearch_config
+            class_inheritable_reader :tsearch_config
             
             fields.uniq!
             #check to make sure all fields exist
@@ -142,11 +144,11 @@ module TsearchMixin
           #assume vector column is named "vectors" unless otherwise specified
           tsearch_options[:vector] = "vectors" unless tsearch_options.keys.include?(:vector)
           raise "Vector [#{tsearch_options[:vector].intern}] not found 
-                  in acts_as_tsearch config: #{@tsearch_config.to_yaml}
-                  " if !@tsearch_config.keys.include?(tsearch_options[:vector].intern)
+                  in acts_as_tsearch config: #{tsearch_config.to_yaml}
+                  " if !tsearch_config.keys.include?(tsearch_options[:vector].intern)
           tsearch_options[:fix_query] = true if tsearch_options[:fix_query].nil?
 
-          locale = @tsearch_config[tsearch_options[:vector].intern][:locale]
+          locale = tsearch_config[tsearch_options[:vector].intern][:locale]
           check_for_vector_column(tsearch_options[:vector])
           
           search_string = fix_tsearch_query(search_string) if tsearch_options[:fix_query] == true
@@ -269,7 +271,7 @@ module TsearchMixin
         end
         
         def update_vectors(row_id = nil)
-          @tsearch_config.keys.each do |k|
+          tsearch_config.keys.each do |k|
             update_vector(row_id, k.to_s)
           end
         end
@@ -305,12 +307,12 @@ module TsearchMixin
           if !column_names().include?(vector_name)
             create_vector(vector_name)
           end
-          if !@tsearch_config[vector_name.intern]
-            raise "Missing vector #{vector_name} in hash #{@tsearch_config.to_yaml}"
+          if !tsearch_config[vector_name.intern]
+            raise "Missing vector #{vector_name} in hash #{tsearch_config.to_yaml}"
           else
-            locale = @tsearch_config[vector_name.intern][:locale]
-            fields = @tsearch_config[vector_name.intern][:fields]
-            tables = @tsearch_config[vector_name.intern][:tables]
+            locale = tsearch_config[vector_name.intern][:locale]
+            fields = tsearch_config[vector_name.intern][:fields]
+            tables = tsearch_config[vector_name.intern][:tables]
             if fields.is_a?(Array)
               sql = "update #{table_name} set #{vector_name} = to_tsvector(#{coalesce_array(fields)})"
             elsif fields.is_a?(String)
@@ -352,11 +354,7 @@ module TsearchMixin
             #puts sql
           end #tsearch config test
         end
-        
-        def acts_as_tsearch_config
-          @tsearch_config
-        end
-        
+                
         def coalesce_array(arr)
           res = []
           arr.each do |f|
@@ -374,16 +372,9 @@ module TsearchMixin
       module InstanceMethods
         
         def update_vector_row
-          # self.class.tsearch_config.keys.each do |k|
-          #    if self.class.tsearch_config[k][:auto_update_index] == true
-          #      self.class.update_vector(self.id,k.to_s)
-          
-          #fixes STI problems - contributed by Craig Barber http://code.google.com/p/acts-as-tsearch/issues/detail?id=1&can=2&q=
-          klass = self.class
-          klass = klass.superclass while klass.tsearch_config.nil?
-          klass.tsearch_config.keys.each do |k|
-            if klass.tsearch_config[k][:auto_update_index] == true
-              klass.update_vector(self.id,k.to_s)            
+          self.class.tsearch_config.keys.each do |k|
+            if self.class.tsearch_config[k][:auto_update_index] == true
+              self.class.update_vector(self.id,k.to_s)
             end
           end
         end

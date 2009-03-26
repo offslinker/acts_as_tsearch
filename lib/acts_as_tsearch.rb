@@ -48,7 +48,7 @@ module TsearchMixin
           
           fields = []
           tsearch_config = {}
-          default_config = {:locale => "default", :auto_update_index => true}
+          default_config = { :auto_update_index => true }
           
           #they passed in :fields => "somefield" or :fields => [:one, :two, :three]
           #:fields => "somefield"
@@ -175,7 +175,6 @@ module TsearchMixin
 
           search_string = fix_tsearch_query(search_string) if (tsearch_options[:fix_query].nil? || tsearch_options[:fix_query] == true)
 
-          locale = tsearch_config[tsearch_options[:vector].intern][:locale]
           check_for_vector_column(tsearch_options[:vector])
                  
           # define tsearch rank function
@@ -296,7 +295,6 @@ module TsearchMixin
           if !tsearch_config[vector_name.intern]
             raise "Missing vector #{vector_name} in hash #{tsearch_config.to_yaml}"
           else
-            locale = tsearch_config[vector_name.intern][:locale]
             fields = tsearch_config[vector_name.intern][:fields]
             tables = tsearch_config[vector_name.intern][:tables]
             if fields.is_a?(Array)

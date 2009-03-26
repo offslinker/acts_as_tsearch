@@ -13,102 +13,131 @@ module TsearchMixin
       # will load the relevant instance methods
       # defined below when invoked
       module ClassMethods
-
+        
+        # Extends the calling class with PostgreSQL full text search methods.
         def acts_as_tsearch(options = {})
-          # check for table existence
+          return false unless database_table_exists?
+          ensure_database_supports_text_search!
+          extract_tsearch_config_from_options!(options)
+          
+          class_eval do
+            after_save :update_vector_row      
+            extend TsearchMixin::Acts::Tsearch::SingletonMethods
+          end
+          
+          include TsearchMixin::Acts::Tsearch::InstanceMethods
+        end
+        
+        
+        private
+        
+        
+        # Raises an exception unless running on PostgreSQL with full text search built in.
+        def ensure_database_supports_text_search!
+          postgresql_version = connection.instance_variable_get('@postgresql_version')  
+          raise "acts_as_tsearch: you must upgrade to Postgres 8.3 before using tsearch" unless postgresql_version >= 80300   
+        end
+        
+        # Extracts tsearch configuration from the given options Hash.
+        # Raises an exception if options is nil or malformed.
+        def extract_tsearch_config_from_options!(options)
+          if !options.is_a?(Hash)
+            raise "Missing required fields for acts_as_tsearch.  At a bare minimum you need :fields => 'SomeFileName'.  Please see
+            documentation on http://acts-as-tsearch.rubyforge.org"
+          end
+          
+          fields = []
+          tsearch_config = {}
+          default_config = {:locale => "default", :auto_update_index => true}
+          
+          #they passed in :fields => "somefield" or :fields => [:one, :two, :three]
+          #:fields => "somefield"
+          if options[:fields].is_a?(String)
+            tsearch_config = {:vectors => default_config.clone}
+            tsearch_config[:vectors][:fields] = 
+              {"a" => {:columns => [options[:fields]], :weight => 1.0}}
+            fields << options[:fields]
+          
+          #:fields => [:one, :two]
+          elsif options[:fields].is_a?(Array)
+            tsearch_config = {:vectors => default_config.clone}
+            tsearch_config[:vectors][:fields] = 
+              {"a" => {:columns => options[:fields], :weight => 1.0}}
+            fields = options[:fields]
+         
+          # :fields => {"a" => {:columns => [:one, :two], :weight => 1},
+          #              "b" => {:colums => [:three, :four], :weight => 0.5}
+          #              }
+          elsif options[:fields].is_a?(Hash)
+            tsearch_config = {:vectors => default_config.clone}
+            tsearch_config[:vectors][:fields] = options[:fields]
+            options[:fields].keys.each do |k|
+              options[:fields][k][:columns].each do |f|
+                fields << f
+              end
+            end
+          else
+            # :vectors => {
+            #   :auto_update_index => false,
+            #   :fields => [:title, :description]
+            # }
+            options.keys.each do |k|
+              tsearch_config[k] = default_config.clone
+              tsearch_config[k].update(options[k])
+              if options[k][:fields].is_a?(String)
+                fields << options[k][:fields]
+              elsif options[k][:fields].is_a?(Array)
+                options[k][:fields].each do |f|
+                  fields << f
+                end
+              else
+                options[k][:fields].keys.each do |kk|
+                  options[k][:fields][kk][:columns].each do |f|
+                    fields << f
+                  end
+                end
+              end
+              #TODO: add error checking here for complex fields - right know - assume it's correct
+              #puts k.to_s + " yamled = " + tsearch_config.to_yaml
+            end
+            
+          end
+          
+          validate_option_fields!(fields)
+          
+          # Define tsearch_config as a class inheritable attribute, so that
+          # subclasses inherit it and can optionally override it.
+          write_inheritable_attribute :tsearch_config, tsearch_config
+          class_inheritable_reader :tsearch_config
+        end #tsearch_config_from_options
+        
+        
+        # Raises an exception unless all columns in +fields+ exist within database table.
+        def validate_option_fields!(fields)
+          fields.uniq!
+          #check to make sure all fields exist
+          #TODO Write check code for multi-table... ignoring this for now
+          missing_fields = []
+          fields.each do |f|
+            missing_fields << f.to_s unless column_names().include?(f.to_s) or f.to_s.include?(".")
+          end
+          raise ArgumentError, "Missing fields: #{missing_fields.sort.join(",")} in acts_as_tsearch definition for 
+            table #{table_name}" if missing_fields.size > 0
+        end
+        
+        
+        # Returns a boolean answering whether the database table exists.
+        def database_table_exists?
           begin
-             column_names()
+            column_names()
+            return true
           rescue Exception => e
             logger.error "acts_as_tsearch: Table #{table_name()} for Model #{human_name()} could not be accessed. Is the database configured?"
             return false
           end
-          
-          default_config = {:locale => "default", :auto_update_index => true}
-          tsearch_config = {}
-          if !options.is_a?(Hash)
-            raise "Missing required fields for acts_as_tsearch.  At a bare minimum you need :fields => 'SomeFileName'.  Please see
-            documentation on http://acts-as-tsearch.rubyforge.org"
-          else
-            fields = []
-            #they passed in :fields => "somefield" or :fields => [:one, :two, :three]
-            #:fields => "somefield"
-            if options[:fields].is_a?(String)
-              tsearch_config = {:vectors => default_config.clone}
-              tsearch_config[:vectors][:fields] = 
-                {"a" => {:columns => [options[:fields]], :weight => 1.0}}
-              fields << options[:fields]
-            #:fields => [:one, :two]
-            elsif options[:fields].is_a?(Array)
-              tsearch_config = {:vectors => default_config.clone}
-              tsearch_config[:vectors][:fields] = 
-                {"a" => {:columns => options[:fields], :weight => 1.0}}
-              fields = options[:fields]
-            # :fields => {"a" => {:columns => [:one, :two], :weight => 1},
-            #              "b" => {:colums => [:three, :four], :weight => 0.5}
-            #              }
-            elsif options[:fields].is_a?(Hash)
-              tsearch_config = {:vectors => default_config.clone}
-              tsearch_config[:vectors][:fields] = options[:fields]
-              options[:fields].keys.each do |k|
-                options[:fields][k][:columns].each do |f|
-                  fields << f
-                end
-              end
-            else
-              # :vectors => {
-              #   :auto_update_index => false,
-              #   :fields => [:title, :description]
-              # }
-              options.keys.each do |k|
-                tsearch_config[k] = default_config.clone
-                tsearch_config[k].update(options[k])
-                if options[k][:fields].is_a?(String)
-                  fields << options[k][:fields]
-                elsif options[k][:fields].is_a?(Array)
-                  options[k][:fields].each do |f|
-                    fields << f
-                  end
-                else
-                  options[k][:fields].keys.each do |kk|
-                    options[k][:fields][kk][:columns].each do |f|
-                      fields << f
-                    end
-                  end
-                end
-                #TODO: add error checking here for complex fields - right know - assume it's correct
-                #puts k.to_s + " yamled = " + tsearch_config.to_yaml
-              end
-            end
-            
-            # Define tsearch_config as a class inheritable attribute, so that
-            # subclasses inherit it and can optionally override it.
-            write_inheritable_attribute :tsearch_config, tsearch_config
-            class_inheritable_reader :tsearch_config
-            
-            fields.uniq!
-            #check to make sure all fields exist
-            #TODO Write check code for multi-table... ignoring this for now
-            missing_fields = []
-            fields.each do |f|
-              missing_fields << f.to_s unless column_names().include?(f.to_s) or f.to_s.include?(".")
-            end
-            raise ArgumentError, "Missing fields: #{missing_fields.sort.join(",")} in acts_as_tsearch definition for 
-              table #{table_name}" if missing_fields.size > 0
-          end
-          
-          class_eval do
-            @@postgresql_version = connection.instance_variable_get('@postgresql_version')
-            def self.postgresql_version
-              @@postgresql_version
-            end
-            
-            after_save :update_vector_row
-          
-            extend TsearchMixin::Acts::Tsearch::SingletonMethods
-          end
-          include TsearchMixin::Acts::Tsearch::InstanceMethods
         end
-      end
+
+      end #ClassMethods
 
       module SingletonMethods
 
@@ -136,7 +165,6 @@ module TsearchMixin
         #TODO:  Not sure how to handle order... current we add to it if it exists but this might not
         #be the right thing to do
         def find_by_tsearch(search_string, options = nil, tsearch_options = nil)
-          raise "You must upgrade to Postgres 8.3 before using tsearch" unless is_postgresql_83?
           raise ActiveRecord::RecordNotFound, "Couldn't find #{name} without a search string" if search_string.nil? || search_string.empty?
 
           options = {} if options.nil?
@@ -363,9 +391,6 @@ module TsearchMixin
           return res.join(" || ' ' || ")        
         end
 
-        def is_postgresql_83?
-          self.postgresql_version >= 80300
-        end
       end
       
       # Adds instance methods.

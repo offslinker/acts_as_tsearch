@@ -204,15 +204,24 @@ class ActsAsTsearchTest < Test::Unit::TestCase
           }
         }
     end
-    
   end
   
+  
+  def test_subclass_inherits_superclass_tsearch_config
+    BlogEntry.acts_as_tsearch :fields => "title"
+    eval "class SpecialBlogEntry < BlogEntry; end;"
+    assert_equal SpecialBlogEntry.tsearch_config, BlogEntry.tsearch_config
+    
+    b = SpecialBlogEntry.find_by_tsearch("bob")[0]
+    assert b.id == 1, b.to_yaml
+  end
+
   def test_vectors
 #     Profile.acts_as_tsearch :public_vector => {:fields => {"a" => {:columns => [:name, :public_info]}}},
 #                             :private_vector => {:fields => {"a" => {:columns => [:name, :private_info]}}}
      Profile.acts_as_tsearch :public_vector => {:fields => [:name, :public_info]},
                              :private_vector => {:fields => [:name, :private_info]}
-#raise Profile.acts_as_tsearch_config.to_yaml
+#raise Profile.tsearch_config.to_yaml
     Profile.update_vectors
     p = Profile.find_by_tsearch("ben",nil,{:vector => "public_vector"})[0]
     assert p.name == "ben", "Couldn't find 'ben' in public profile search"

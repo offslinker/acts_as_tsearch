@@ -147,20 +147,19 @@ module TsearchMixin
         def find_by_tsearch(search_string, options = nil, tsearch_options = nil)
           raise ActiveRecord::RecordNotFound, "Couldn't find #{name} without a search string" if search_string.blank?
 
-          options ||= {} 
-          tsearch_options ||= {} 
-          
-          tsearch_options[:vector] ||= "vectors"
+          options ||= {}
+          tsearch_options ||= {}
+          set_default_tsearch_options!(tsearch_options)
+
           ensure_tsearch_vector_column_exists!(tsearch_options)
-
-          search_string = fix_tsearch_query(search_string) if (tsearch_options[:fix_query].nil? || tsearch_options[:fix_query] == true)
-
           check_for_vector_column(tsearch_options[:vector])
-                 
-          # define tsearch rank function
-          tsearch_rank_function = "ts_rank_cd(#{table_name}.#{tsearch_options[:vector]},tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
-          add_tsearch_rank_to_select!(options, tsearch_rank_function)
-          add_tsearch_rank_to_order!(options, tsearch_rank_function)
+
+          search_string = fix_tsearch_query(search_string, tsearch_options)
+
+          rank_function = tsearch_rank_function(tsearch_options)
+          add_tsearch_rank_to_select!(options, rank_function)
+          add_tsearch_rank_to_order!(options, rank_function)
+
           add_tsearch_headlines_to_select!(options, tsearch_options)
           add_tsearch_query_string_to_from!(options, search_string)
           add_tsearch_vector_to_conditions!(options, tsearch_options, search_string)
@@ -180,11 +179,15 @@ module TsearchMixin
         end        
 
         # Create a tsearch_query from a Google like query (and or " +)
-        def fix_tsearch_query(query)
-          terms = query_to_terms(clean_query(query))
-          terms.flatten!
-          terms.shift
-          terms.join
+        def fix_tsearch_query(query, tsearch_options = {})
+          if (tsearch_options[:fix_query].nil? || tsearch_options[:fix_query] == true)
+            terms = query_to_terms(clean_query(query))
+            terms.flatten!
+            terms.shift
+            terms.join
+          else
+            query
+          end
         end
         
         # Convert a search query into an array of terms [prefix, term] where
@@ -343,6 +346,15 @@ module TsearchMixin
           return res.join(" || ' ' || ")        
         end
         
+          # Returns a SQL Select string for full text search rank function.
+          # Helpful when combining text search queries with other kinds of queries.
+          def tsearch_rank_select_sql(tsearch_options = {})
+            rank_function = tsearch_rank_function(tsearch_options)
+            options = {}
+            add_tsearch_rank_to_select!(options, rank_function)
+            options[:select]
+          end
+
         
         private
         

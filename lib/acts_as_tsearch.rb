@@ -169,18 +169,16 @@ module TsearchMixin
 
           options ||= {}
           tsearch_options ||= {}
+          set_default_tsearch_options!(tsearch_options)
 
-          tsearch_options[:vector] ||= "vectors"
           ensure_tsearch_vector_column_exists!(tsearch_options)
-
-          search_string = fix_tsearch_query(search_string) if (tsearch_options[:fix_query].nil? || tsearch_options[:fix_query] == true)
-
           check_for_vector_column(tsearch_options[:vector])
 
-          # define tsearch rank function
-          tsearch_rank_function = "ts_rank_cd(#{table_name}.#{tsearch_options[:vector]},tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
-          add_tsearch_rank_to_select!(options, tsearch_rank_function)
-          add_tsearch_rank_to_order!(options, tsearch_rank_function)
+          search_string = fix_tsearch_query(search_string, tsearch_options)
+
+          rank_function = tsearch_rank_function(tsearch_options)
+          add_tsearch_rank_to_select!(options, rank_function)
+          add_tsearch_rank_to_order!(options, rank_function)
 
           add_tsearch_headlines_to_select!(options, tsearch_options)
           add_tsearch_query_string_to_from!(options, search_string)
@@ -201,11 +199,15 @@ module TsearchMixin
         end
 
         # Create a tsearch_query from a Google like query (and or " +)
-        def fix_tsearch_query(query)
-          terms = query_to_terms(clean_query(query))
-          terms.flatten!
-          terms.shift
-          terms.join
+        def fix_tsearch_query(query, tsearch_options = {})
+          if (tsearch_options[:fix_query].nil? || tsearch_options[:fix_query] == true)
+            terms = query_to_terms(clean_query(query))
+            terms.flatten!
+            terms.shift
+            terms.join
+          else
+            query
+          end
         end
 
         # Convert a search query into an array of terms [prefix, term] where
@@ -347,11 +349,24 @@ module TsearchMixin
             return res.join(" || ' ' || ")
           end
 
+          # Returns a SQL Select string for full text search rank function.
+          # Helpful when combining text search queries with other kinds of queries.
+          def tsearch_rank_select_sql(tsearch_options = {})
+            rank_function = tsearch_rank_function(tsearch_options)
+            options = {}
+            add_tsearch_rank_to_select!(options, rank_function)
+            options[:select]
+          end
+
 
           private
 
 
           ### Query formatting helpers
+
+          def set_default_tsearch_options!(tsearch_options)
+            tsearch_options[:vector] ||= 'vectors'
+          end
 
           # Raises an exception if table doesn't include a text search vector column
           def ensure_tsearch_vector_column_exists!(tsearch_options)
@@ -360,8 +375,8 @@ module TsearchMixin
             end
           end
 
-          def add_tsearch_rank_to_select!(options, tsearch_rank_function)
-            select_part = "#{tsearch_rank_function} as tsearch_rank"
+          def add_tsearch_rank_to_select!(options, rank_function)
+            select_part = "#{rank_function} as tsearch_rank"
             if options[:select]
               if options[:select].downcase != "count(*)"
                 options[:select] << ", #{select_part}"
@@ -371,14 +386,14 @@ module TsearchMixin
             end
           end
 
-          def add_tsearch_rank_to_order!(options, tsearch_rank_function)
+          def add_tsearch_rank_to_order!(options, rank_function)
             order_part = "tsearch_rank desc"
             if !options[:order]
               # Note if the :include option to ActiveRecord::Base.find is used, the :select option is ignored
               # (in ActiveRecord::Associations.construct_finder_sql_with_included_associations),
               # so the 'tsearch_rank' function def above doesn't make it into the generated SQL, and the order
               # by tsearch_rank fails. So we have to provide that function here, in the order_by clause.
-              options[:order] = (options.has_key?(:include) ? tsearch_rank_function : order_part)
+              options[:order] = (options.has_key?(:include) ? rank_function : order_part)
             end
           end
 
@@ -408,6 +423,12 @@ module TsearchMixin
             else
               options[:conditions] = where_part
             end
+          end
+          
+          # Returns SQL string for text search rank function
+          def tsearch_rank_function(tsearch_options = {})
+            vector_column = tsearch_options[:vector] || 'vectors'
+            "ts_rank_cd(#{table_name}.#{vector_column}, tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
           end
 
         end

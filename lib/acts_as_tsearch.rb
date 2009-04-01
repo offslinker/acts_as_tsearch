@@ -172,7 +172,7 @@ module TsearchMixin
           set_default_tsearch_options!(tsearch_options)
 
           ensure_tsearch_vector_column_exists!(tsearch_options)
-          check_for_vector_column(tsearch_options[:vector])
+          check_for_vector_column!(tsearch_options[:vector])
 
           search_string = fix_tsearch_query(search_string, tsearch_options)
 
@@ -224,20 +224,17 @@ module TsearchMixin
           query.gsub(/[^\w\-\+'"]+/, " ").gsub("'", "''").strip.downcase
         end
 
-        #checks to see if vector column exists.  if it doesn't exist, create it and update isn't index.
-        def check_for_vector_column(vector_name = "vectors")
-          #check for the basics
-          if !column_names().include?(vector_name)
-            #puts "Creating vector column"
-            create_vector(vector_name)
-            #puts "Update vector index"
-            update_vector(nil,vector_name)
-            # raise "Table is missing column [vectors].  Run method create_vector and then
-              # update_vector to create this column and populate it."
-            end
+        # Checks to see if vector column exists.
+        # Raises an error if the column does not exist.
+        def check_for_vector_column!(vector_name = "vectors")
+          if !column_names.include?(vector_name)
+            raise "Table #{table_name} doesn't have a tsearch vector column. Do you need to migrate?"
+          elsif !tsearch_config.keys.include?(vector_name.to_sym)
+            raise "Vector [#{tsearch_options[:vector].intern}] not found in acts_as_tsearch config: #{tsearch_config.to_yaml}"
           end
+        end
 
-          #current just falls through if it fails... this needs work
+          # Creates a full text search vector in this model's database table
           def create_vector(vector_name = "vectors")
             sql = []
             if column_names().include?(vector_name)
@@ -291,54 +288,49 @@ module TsearchMixin
           #           }
           def update_vector(row_id = nil, vector_name = "vectors")
             sql = ""
-            if !column_names().include?(vector_name)
-              create_vector(vector_name)
-            end
-            if !tsearch_config[vector_name.intern]
-              raise "Missing vector #{vector_name} in hash #{tsearch_config.to_yaml}"
-            else
-              fields = tsearch_config[vector_name.intern][:fields]
-              tables = tsearch_config[vector_name.intern][:tables]
-              if fields.is_a?(Array)
-                sql = "update #{table_name} set #{vector_name} = to_tsvector(#{coalesce_array(fields)})"
-              elsif fields.is_a?(String)
-                sql = "update #{table_name} set #{vector_name} = to_tsvector(#{fields})"
-              elsif fields.is_a?(Hash)
-                if fields.size > 4
-                  raise "acts_as_tsearch currently only supports up to 4 weighted sets."
-                else
-                  setweights = []
-                  ["a","b","c","d"].each do |f|
-                    if fields[f]
-                      setweights << "setweight( to_tsvector(#{coalesce_array(fields[f][:columns])}),'#{f.upcase}')"
-                    end
-                  end
-                  sql = "update #{table_name} set #{vector_name} = #{setweights.join(" || ")}"
-                end
-              else
-                raise ":fields was not an Array, Hash or a String."
-              end
-              from_arr = []
-              where_arr = []
-              if !tables.nil? and tables.is_a?(Hash)
-                tables.keys.each do |k|
-                  from_arr << tables[k][:from]
-                  where_arr << tables[k][:where]
-                end
-                if from_arr.size > 0
-                  sql << " from " + from_arr.join(", ")
-                end
-              end
-              if !row_id.nil?
-                where_arr << "#{table_name}.id = #{row_id}"
-              end
-              if where_arr.size > 0
-                sql << " where " + where_arr.join(" and ")
-              end
+            check_for_vector_column!(vector_name)
 
-              connection.execute(sql)
-              #puts sql
-            end #tsearch config test
+            fields = tsearch_config[vector_name.intern][:fields]
+            tables = tsearch_config[vector_name.intern][:tables]
+            if fields.is_a?(Array)
+              sql = "update #{table_name} set #{vector_name} = to_tsvector(#{coalesce_array(fields)})"
+            elsif fields.is_a?(String)
+              sql = "update #{table_name} set #{vector_name} = to_tsvector(#{fields})"
+            elsif fields.is_a?(Hash)
+              if fields.size > 4
+                raise "acts_as_tsearch currently only supports up to 4 weighted sets."
+              else
+                setweights = []
+                ["a","b","c","d"].each do |f|
+                  if fields[f]
+                    setweights << "setweight( to_tsvector(#{coalesce_array(fields[f][:columns])}),'#{f.upcase}')"
+                  end
+                end
+                sql = "update #{table_name} set #{vector_name} = #{setweights.join(" || ")}"
+              end
+            else
+              raise ":fields was not an Array, Hash or a String."
+            end
+            from_arr = []
+            where_arr = []
+            if !tables.nil? and tables.is_a?(Hash)
+              tables.keys.each do |k|
+                from_arr << tables[k][:from]
+                where_arr << tables[k][:where]
+              end
+              if from_arr.size > 0
+                sql << " from " + from_arr.join(", ")
+              end
+            end
+            if !row_id.nil?
+              where_arr << "#{table_name}.id = #{row_id}"
+            end
+            if where_arr.size > 0
+              sql << " where " + where_arr.join(" and ")
+            end
+
+            connection.execute(sql)
+            #puts sql
           end
 
           def coalesce_array(arr)

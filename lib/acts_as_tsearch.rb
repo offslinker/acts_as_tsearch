@@ -281,7 +281,24 @@ module TsearchMixin
             end
           end
         end
-        
+
+        def remove_vector(vector_name = 'vectors')
+          sql = []
+          if column_names().include?(vector_name)
+            sql << "ALTER TABLE #{table_name} DROP COLUMN #{vector_name}"
+          end
+          sql.each do |s|
+            begin
+              connection.execute(s)
+              #puts s
+              reset_column_information
+            rescue StandardError => bang
+              puts "Error in remove_vector executing #{s} " + bang.to_yaml
+              puts ""
+            end
+          end
+        end
+
         def update_vectors(row_id = nil)
           @tsearch_config.keys.each do |k|
             update_vector(row_id, k.to_s)

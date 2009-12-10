@@ -369,5 +369,10 @@ class ActsAsTsearchTest < Test::Unit::TestCase
       
       c = BlogComment.find_by_tsearch('jim', :include => :blog_entry, :conditions => ["email = ?", 'jim@jim.com'])
       assert_equal 2, c.size
+
+      # Hash type condition which is new in Rails 2.?
+      c = BlogComment.find_by_tsearch('jim', :include => :blog_entry, :conditions => {:url => 'http://example.com'})
+      assert_equal 1, c.size
   end
+
 end

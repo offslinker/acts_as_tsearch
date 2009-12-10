@@ -162,13 +162,8 @@ module TsearchMixin
           
           #add vector condition
           where_part = "#{table_name}.#{tsearch_options[:vector]} @@ tsearch_query"
-          if options[:conditions] and options[:conditions].is_a? String
-            options[:conditions] << " and #{where_part}"
-          elsif options[:conditions] and options[:conditions].is_a? Array
-            options[:conditions].first << " and #{where_part}"
-          else
-            options[:conditions] = where_part
-          end
+          options[:conditions] = merge_conditions(options[:conditions], where_part)
+
           order_part = "tsearch_rank desc"
           if !options[:order]
             # Note if the :include option to ActiveRecord::Base.find is used, the :select option is ignored

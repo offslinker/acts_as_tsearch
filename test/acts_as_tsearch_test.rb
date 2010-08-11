@@ -66,6 +66,40 @@ class ActsAsTsearchTest < Test::Unit::TestCase
     assert b.id == 2, b.to_yaml
   end
   
+  # Tests the weights SQL used within ranking
+  def test_tsearch_weights_sql
+    BlogEntry.acts_as_tsearch :vectors => {
+                        :fields => {
+                          "a" => {:columns => ["title"], :weight => 1},
+                          "b" => {:columns => [:description], :weight => 0.5}
+                          }
+                        }
+    s = BlogEntry.tsearch_weights_sql 
+    assert s == "'{ 0.1, 0.2, 0.5, 1 }', ", s.to_yaml
+    
+    BlogEntry.acts_as_tsearch :vectors => {
+                        :fields => {
+                          "a" => {:columns => ["title"], :weight => 1},
+                          "b" => {:columns => [:description], :weight => 0.5},
+                          "c" => {:columns => [:description], :weight => 0.2},
+                          "d" => {:columns => [:description], :weight => 0.75}
+                          }
+                        }
+    s = BlogEntry.tsearch_weights_sql 
+    assert s == "'{ 0.75, 0.2, 0.5, 1 }', ", s.to_yaml
+
+    BlogEntry.acts_as_tsearch :vectors => {
+                        :fields => {
+                          "a" => {:columns => ["title"] },
+                          "b" => {:columns => [:description] },
+                          "c" => {:columns => [:description] },
+                          "d" => {:columns => [:description] }
+                          }
+                        }
+    s = BlogEntry.tsearch_weights_sql 
+    assert s == "'{ 0.1, 0.2, 0.4, 1.0 }', ", s.to_yaml
+  end
+  
   # Do a simple multi-field search
   def test_weight_syntax
     BlogEntry.acts_as_tsearch :vectors => {

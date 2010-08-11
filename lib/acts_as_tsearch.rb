@@ -349,6 +349,21 @@ module TsearchMixin
             add_tsearch_rank_to_select!(options, rank_function)
             options[:select]
           end
+          
+          # Returns a string of SQL to include in the call to ts_rank_cd().
+          # Returns a blank string if search config does not have the key [:vectors][:fields].
+          # Backfills unspecified weights for each field with the PostgreSQL defaults {0.1, 0.2, 0.4, 1.0}.
+          # See http://www.postgresql.org/docs/8.3/static/textsearch-controls.html#TEXTSEARCH-RANKING.
+          def tsearch_weights_sql
+            return '' unless (f =  tsearch_config[:vectors] && tsearch_config[:vectors][:fields] ) && f.is_a?(Hash)
+            weights = [
+              ( f["d"] && f["d"][:weight] ) || 0.1,
+              ( f["c"] && f["c"][:weight] ) || 0.2,
+              ( f["b"] && f["b"][:weight] ) || 0.4,
+              ( f["a"] && f["a"][:weight] ) || 1.0
+            ]
+            "'{ #{weights.join(", ") } }', " 
+          end
 
 
           private
@@ -420,7 +435,7 @@ module TsearchMixin
           # Returns SQL string for text search rank function
           def tsearch_rank_function(tsearch_options = {})
             vector_column = tsearch_options[:vector] || 'vectors'
-            "ts_rank_cd(#{table_name}.#{vector_column}, tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
+            "ts_rank_cd(#{ tsearch_weights_sql } #{table_name}.#{vector_column}, tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
           end
 
         end

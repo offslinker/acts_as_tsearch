@@ -2,10 +2,13 @@ $:.unshift(File.dirname(__FILE__) + '/../lib')
 RAILS_ROOT = File.dirname(__FILE__)
 
 require 'rubygems'
+gem 'rails', '=2.2.3'
 require 'test/unit'
 require 'active_record'
 require 'active_record/fixtures'
 require "#{File.dirname(__FILE__)}/../init"
+
+
 
 config = YAML::load(IO.read(File.dirname(__FILE__) + '/database.yml'))
 ActiveRecord::Base.logger = Logger.new(File.dirname(__FILE__) + "/debug.log")

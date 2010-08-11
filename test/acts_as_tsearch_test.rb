@@ -29,6 +29,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
 
   def test_empty_search
     BlogEntry.acts_as_tsearch :fields => "title"
+    BlogEntry.create_vector
     BlogEntry.update_vectors
 
     assert_raise ActiveRecord::RecordNotFound do
@@ -43,6 +44,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
   # Do the most basic search
   def test_simple_search
     BlogEntry.acts_as_tsearch :fields => "title"
+    BlogEntry.create_vector
     BlogEntry.update_vectors
     b = BlogEntry.find_by_tsearch("bob")[0]
     assert b.id == 1, b.to_yaml
@@ -58,6 +60,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
   # Do a simple multi-field search
   def test_simple_two_field
     BlogEntry.acts_as_tsearch :fields => [:title, :description]
+    BlogEntry.create_vector
     BlogEntry.update_vectors
     b = BlogEntry.find_by_tsearch("bob")[0]
     assert b.id == 1, b.to_yaml
@@ -76,6 +79,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
                           "b" => {:columns => [:description], :weight => 0.5}
                           }
                         }
+    BlogEntry.create_vector
     BlogEntry.update_vectors
     b = BlogEntry.find_by_tsearch("bob")[0]
     assert b.id == 1, b.to_yaml
@@ -114,6 +118,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
                           }
                         }
 
+    BlogEntry.create_vector
     BlogEntry.update_vectors
     
     assert_nothing_raised do
@@ -142,6 +147,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
   # Test the auto-update functionality
   def test_add_row_and_search
     BlogEntry.acts_as_tsearch :fields => [:title, :description]
+    BlogEntry.create_vector
     BlogEntry.update_vectors
     b = BlogEntry.new
     b.title = "qqq"
@@ -156,6 +162,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
   
   def test_count_by_search
     BlogEntry.acts_as_tsearch :fields => "title"
+    BlogEntry.create_vector
     BlogEntry.update_vectors
     
     assert BlogEntry.count_by_tsearch("bob") == 1
@@ -168,6 +175,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
       :auto_update_index => false,
       :fields => [:title, :description]
     }
+    BlogEntry.create_vector
     BlogEntry.update_vectors
     b = BlogEntry.new
     b.title = "uuii"
@@ -222,7 +230,10 @@ class ActsAsTsearchTest < Test::Unit::TestCase
      Profile.acts_as_tsearch :public_vector => {:fields => [:name, :public_info]},
                              :private_vector => {:fields => [:name, :private_info]}
 #raise Profile.tsearch_config.to_yaml
+    Profile.create_vector(:public_vector)
+    Profile.create_vector(:private_vector)
     Profile.update_vectors
+    
     p = Profile.find_by_tsearch("ben",nil,{:vector => "public_vector"})[0]
     assert p.name == "ben", "Couldn't find 'ben' in public profile search"
 
@@ -297,6 +308,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
 
   def test_association_query_belongs_to
       BlogComment.acts_as_tsearch :fields => 'comment'
+      BlogComment.create_vector
       BlogComment.update_vectors
       
       e = BlogComment.find_by_tsearch('nice')[0].blog_entry
@@ -305,6 +317,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
   
   def test_association_query_has_many
       BlogComment.acts_as_tsearch :fields => %w{name comment}
+      BlogComment.create_vector
       BlogComment.update_vectors
       
       c = BlogEntry.find(1).blog_comments.find_by_tsearch("really AND jim")
@@ -315,6 +328,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
   def test_association_query_has_and_belongs_to_many
       Profile.find(1).blog_entries << BlogEntry.find(2)
       BlogEntry.acts_as_tsearch :fields => 'description'
+      BlogEntry.create_vector
       BlogEntry.update_vectors
 
       # without tsearch
@@ -330,6 +344,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
 
   def test_find_using_joins_option
       BlogComment.acts_as_tsearch :fields => %w{name}
+      BlogComment.create_vector
       BlogComment.update_vectors
 
       # :joins is a seldom used .find option, that lets you add joins to the FROM clause,
@@ -343,6 +358,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
 
   def test_find_using_include_option
       BlogComment.acts_as_tsearch :fields => %w{name}
+      BlogComment.create_vector
       BlogComment.update_vectors
   
       c = BlogComment.find_by_tsearch('jim', :include => :blog_entry)
@@ -371,6 +387,7 @@ class ActsAsTsearchTest < Test::Unit::TestCase
   
   def test_find_using_conditions
       BlogComment.acts_as_tsearch :fields => %w{name}
+      BlogComment.create_vector
       BlogComment.update_vectors
       
       c = BlogComment.find_by_tsearch('jim', :include => :blog_entry, :conditions => "email = 'jim@jim.com'")

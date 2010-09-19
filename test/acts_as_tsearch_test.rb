@@ -417,7 +417,6 @@ class ActsAsTsearchTest < Test::Unit::TestCase
       assert_equal "1", c[1].tsearch_rank
   end
 
-  
   def test_find_using_conditions
       BlogComment.acts_as_tsearch :fields => %w{name}
       BlogComment.create_vector
@@ -434,4 +433,13 @@ class ActsAsTsearchTest < Test::Unit::TestCase
       assert_equal 1, c.size
   end
 
+  def test_keeping_old_options
+      BlogComment.acts_as_tsearch :fields => %w{name}
+      BlogComment.create_vector
+      BlogComment.update_vectors
+      options = {:conditions => "email = 'jim@jim.com'"}
+      c = BlogComment.find_by_tsearch_options('jim', options)
+      assert_not_equal options, c
+      assert_equal options[:conditions], "email = 'jim@jim.com'"
+  end
 end

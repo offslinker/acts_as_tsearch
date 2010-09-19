@@ -144,11 +144,11 @@ module TsearchMixin
         #Find options for a tsearch2 formated query
         #TODO:  Not sure how to handle order... current we add to it if it exists but this might not
         #be the right thing to do
-        def find_by_tsearch_options(search_string, options = nil, tsearch_options = nil)
+        def find_by_tsearch_options(search_string, options = {}, tsearch_options = {})
           raise ActiveRecord::RecordNotFound, "Couldn't find #{name} without a search string" if search_string.blank?
-
-          options ||= {}
-          tsearch_options ||= {}
+          
+          options = deep_copy(options || {})
+          tsearch_options = deep_copy(tsearch_options || {})
           set_default_tsearch_options!(tsearch_options)
 
           ensure_tsearch_vector_column_exists!(tsearch_options)
@@ -167,7 +167,7 @@ module TsearchMixin
           options
         end
 
-        def find_by_tsearch(search_string, options = nil, tsearch_options = nil)
+        def find_by_tsearch(search_string, options = {}, tsearch_options = {})
           options = find_by_tsearch_options(search_string, options, tsearch_options)
           find(:all, options)
           #   :select => "#{table_name}.*, ts_rank_cd(blogger_groups.vectors, query) as tsearch_rank",
@@ -177,13 +177,13 @@ module TsearchMixin
 
         end
 
-        def scoped_by_tsearch(search_string, options = nil, tsearch_options = nil)
+        def scoped_by_tsearch(search_string, options = {}, tsearch_options = {})
           options = find_by_tsearch_options(search_string, options, tsearch_options)
           scoped(options)
         end
 
         def count_by_tsearch(search_string, options = {}, tsearch_options = {})
-          options = find_by_tsearch_options(search_string, options = nil, tsearch_options = nil)
+          options = find_by_tsearch_options(search_string, options, tsearch_options)
           options[:select] = "count(*)"
           options[:order] = "1 desc"
           find(:all,options)[0][:count].to_i
@@ -444,6 +444,10 @@ module TsearchMixin
         def tsearch_rank_function(tsearch_options = {})
           vector_column = tsearch_options[:vector] || 'vectors'
           "ts_rank_cd(#{ tsearch_weights_sql } #{table_name}.#{vector_column}, tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
+        end
+
+        def deep_copy(object)
+          Marshal.load( Marshal.dump(object))
         end
       end
       

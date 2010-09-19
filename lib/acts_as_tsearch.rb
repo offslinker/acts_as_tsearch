@@ -392,7 +392,6 @@ module TsearchMixin
         # Raises an exception if table doesn't include a text search vector column
         def ensure_tsearch_vector_column_exists!(tsearch_options)
           unless tsearch_config.keys.include?(tsearch_options[:vector].intern)
-            p tsearch_options.inspect
             raise "Vector [#{tsearch_options[:vector].intern}] not found in acts_as_tsearch config: #{tsearch_config.to_yaml}" 
           end
         end

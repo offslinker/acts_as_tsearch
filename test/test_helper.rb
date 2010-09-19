@@ -1,5 +1,4 @@
 require 'rubygems'
-gem 'rails', '=2.2.3'
 require 'test/unit'
 require 'active_record'
 require 'active_record/fixtures'

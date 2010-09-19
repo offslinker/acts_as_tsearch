@@ -267,7 +267,6 @@ class ActsAsTsearchTest < Test::Unit::TestCase
     Profile.create_vector(:public_vector)
     Profile.create_vector(:private_vector)
     Profile.update_vectors
-    
     p = Profile.find_by_tsearch("ben",nil,{:vector => "public_vector"})[0]
     assert p.name == "ben", "Couldn't find 'ben' in public profile search"
 

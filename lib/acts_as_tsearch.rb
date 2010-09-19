@@ -144,7 +144,7 @@ module TsearchMixin
         #Find options for a tsearch2 formated query
         #TODO:  Not sure how to handle order... current we add to it if it exists but this might not
         #be the right thing to do
-        def find_by_tsearch(search_string, options = nil, tsearch_options = nil)
+        def find_by_tsearch_options(search_string, options = nil, tsearch_options = nil)
           raise ActiveRecord::RecordNotFound, "Couldn't find #{name} without a search string" if search_string.blank?
 
           options ||= {}
@@ -164,20 +164,31 @@ module TsearchMixin
           add_tsearch_query_string_to_from!(options, search_string)
           add_tsearch_vector_to_conditions!(options, tsearch_options, search_string)
           
-          # Return find options as a query scope, rather than a find(:all).  The options look like this:
+          options
+        end
+
+        def find_by_tsearch(search_string, options = nil, tsearch_options = nil)
+          options = find_by_tsearch_options(search_string, options, tsearch_options)
+          find(:all, options)
           #   :select => "#{table_name}.*, ts_rank_cd(blogger_groups.vectors, query) as tsearch_rank",
           #   :from => "#{table_name}, to_tsquery('default','#{search_string}') as query",
           #   :conditions => "#{table_name}.vectors @@ query",
           #   :order => "tsearch_rank"
+
+        end
+
+        def scoped_by_tsearch(search_string, options = nil, tsearch_options = nil)
+          options = find_by_tsearch_options(search_string, options, tsearch_options)
           scoped(options)
         end
 
         def count_by_tsearch(search_string, options = {}, tsearch_options = {})
-            options[:select] = "count(*)"
-            options[:order] = "1 desc"
-            find_by_tsearch(search_string, options, tsearch_options)[0][:count].to_i
+          options = find_by_tsearch_options(search_string, options = nil, tsearch_options = nil)
+          options[:select] = "count(*)"
+          options[:order] = "1 desc"
+          find(:all,options)[0][:count].to_i
         end        
-
+        
         # Create a tsearch_query from a Google like query (and or " +)
         def fix_tsearch_query(query, tsearch_options = {})
           if (tsearch_options[:fix_query].nil? || tsearch_options[:fix_query] == true)
@@ -373,12 +384,15 @@ module TsearchMixin
         
         private
         
-        
+          def set_default_tsearch_options!(tsearch_options)
+            tsearch_options[:vector] ||= 'vectors'
+          end
         ### Query formatting helpers
         
         # Raises an exception if table doesn't include a text search vector column
         def ensure_tsearch_vector_column_exists!(tsearch_options)
           unless tsearch_config.keys.include?(tsearch_options[:vector].intern)
+            p tsearch_options.inspect
             raise "Vector [#{tsearch_options[:vector].intern}] not found in acts_as_tsearch config: #{tsearch_config.to_yaml}" 
           end
         end
@@ -401,7 +415,7 @@ module TsearchMixin
             # (in ActiveRecord::Associations.construct_finder_sql_with_included_associations),
             # so the 'tsearch_rank' function def above doesn't make it into the generated SQL, and the order
             # by tsearch_rank fails. So we have to provide that function here, in the order_by clause.
-            options[:order] = (options.has_key?(:include) ? tsearch_rank_function : order_part)
+            options[:order] = (options.has_key?(:include) ? tsearch_rank_function + "desc" : order_part)
           end
         end
         
@@ -427,6 +441,11 @@ module TsearchMixin
           options[:conditions] = merge_conditions(options[:conditions], where_part)
         end
 
+        # Returns SQL string for text search rank function
+        def tsearch_rank_function(tsearch_options = {})
+          vector_column = tsearch_options[:vector] || 'vectors'
+          "ts_rank_cd(#{ tsearch_weights_sql } #{table_name}.#{vector_column}, tsearch_query#{','+tsearch_options[:normalization].to_s if tsearch_options[:normalization]})"
+        end
       end
       
       # Adds instance methods.

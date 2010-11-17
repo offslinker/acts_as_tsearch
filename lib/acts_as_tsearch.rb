@@ -152,7 +152,6 @@ module TsearchMixin
           set_default_tsearch_options!(tsearch_options)
 
           ensure_tsearch_vector_column_exists!(tsearch_options)
-          check_for_vector_column(tsearch_options[:vector])
 
           search_string = fix_tsearch_query(search_string, tsearch_options)
 
@@ -215,56 +214,6 @@ module TsearchMixin
           query.gsub(/[^\w\-\+'"]+/, " ").gsub("'", "''").strip.downcase     
         end
         
-        #checks to see if vector column exists.  if it doesn't exist, create it and update isn't index.
-        def check_for_vector_column(vector_name = "vectors")
-          #check for the basics
-          if !column_names().include?(vector_name)
-            #puts "Creating vector column"
-            create_vector(vector_name)
-            #puts "Update vector index"
-            update_vector(nil,vector_name)
-            # raise "Table is missing column [vectors].  Run method create_vector and then 
-            # update_vector to create this column and populate it."
-          end
-        end
-
-        #current just falls through if it fails... this needs work
-        def create_vector(vector_name = "vectors")
-          sql = []
-          if column_names().include?(vector_name)
-            sql << "alter table #{table_name} drop column #{vector_name}"
-          end
-          sql << "alter table #{table_name} add column #{vector_name} tsvector"
-          sql << "CREATE INDEX #{table_name}_fts_#{vector_name}_index ON #{table_name} USING gist(#{vector_name})"
-          sql.each do |s|
-            begin
-              connection.execute(s)
-              #puts s
-              reset_column_information
-            rescue StandardError => bang
-              puts "Error in create_vector executing #{s} " + bang.to_yaml
-              puts ""
-            end
-          end
-        end
-
-        def remove_vector(vector_name = 'vectors')
-          sql = []
-          if column_names().include?(vector_name)
-            sql << "ALTER TABLE #{table_name} DROP COLUMN #{vector_name}"
-          end
-          sql.each do |s|
-            begin
-              connection.execute(s)
-              #puts s
-              reset_column_information
-            rescue StandardError => bang
-              puts "Error in remove_vector executing #{s} " + bang.to_yaml
-              puts ""
-            end
-          end
-        end
-
         def update_vectors(row_id = nil)
           tsearch_config.keys.each do |k|
             update_vector(row_id, k.to_s)
@@ -299,9 +248,7 @@ module TsearchMixin
         #           }
         def update_vector(row_id = nil, vector_name = "vectors")
           sql = ""
-          if !column_names().include?(vector_name)
-            create_vector(vector_name)
-          end
+          # Do not auto-create vector column; require a migration to do that, allow method to fail
           if !tsearch_config[vector_name.intern]
             raise "Missing vector #{vector_name} in hash #{tsearch_config.to_yaml}"
           else
@@ -464,13 +411,53 @@ module TsearchMixin
         
       end
 
+      # Declare schema statements used in migrations;
+      # NOTE These replace the old create_vector and remove_vector code to use rails conventions of migrations
+      module SchemaStatements
+
+        # Creates a tsearch column in the table;
+        def add_tsearch_column(table_name, column_name='vectors')
+          # First add column
+          ActiveRecord::Migration.say("add_column(#{table_name.inspect}, #{column_name.inspect}, #{:tsvector})", true)
+          add_column table_name, column_name, :tsvector
+
+          # Then create a custom index
+          index_name = "#{table_name}_fts_#{column_name}_index"
+          add_index_sql = "CREATE INDEX #{index_name} ON #{table_name} USING gist(#{column_name})"
+          ActiveRecord::Migration.say("add_index(#{table_name.inspect}, #{index_name.inspect})", true)
+          execute(add_index_sql)
+        end
+
+        # Removes a tsearch column in the table
+        def remove_tsearch_column(table_name, column_name='vectors')
+          index_name = "#{table_name}_fts_#{column_name}_index"
+          ActiveRecord::Migration.say("remove_index(#{table_name.inspect}, #{index_name.inspect})", true)
+          remove_index table_name, :name => index_name
+          ActiveRecord::Migration.say("remove_column(#{table_name.inspect}, #{column_name.inspect})", true)
+          remove_column table_name, column_name
+        end
+
+        # Updates the index on a tsearch column
+        def update_tsearch_column(table_name, column_name='vectors', options={})
+          # TODO Would like to refactor the update_vector code so that we could use a worker function;
+          #  it would operate on a table and column name and options; then update_vector would call that same worker.
+          klass = (options[:class_name] || table_name.singularize.classify).constantize
+          klass.update_vector(nil, column_name)          
+        end
+      end
+
+      module TableDefinitions
+        # TODO Add methods so we can do t.tsearch(:name) in a table def;
+        #  perhaps this will help with schema.rb, since right now that has the incorrect add_index method,
+        #  since it uses 'btree' instead of 'gist'
+      end
     end
   end
 end
 
-# reopen ActiveRecord and include all the above to make
-# them available to all our models if they want it
+# Add in our migration helpers
+ActiveRecord::ConnectionAdapters::AbstractAdapter.send :include, TsearchMixin::Acts::Tsearch::SchemaStatements
+#ActiveRecord::ConnectionAdapters::TableDefinition.send :include, TsearchMixin::Acts::Tsearch::TableDefinitions
 
-ActiveRecord::Base.class_eval do
-  include TsearchMixin::Acts::Tsearch
-end
+# Make acts_as_tsearch available to all ActiveRecord models
+ActiveRecord::Base.send :include, TsearchMixin::Acts::Tsearch

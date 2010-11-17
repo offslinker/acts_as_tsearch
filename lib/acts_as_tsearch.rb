@@ -16,7 +16,6 @@ module TsearchMixin
         
         # Extends the calling class with PostgreSQL full text search methods.
         def acts_as_tsearch(options = {})
-          return false unless database_table_exists?
           ensure_database_supports_text_search!
           extract_tsearch_config_from_options!(options)
           
@@ -102,8 +101,9 @@ module TsearchMixin
             end
             
           end
-          
-          validate_option_fields!(fields)
+
+          # Only validate the option fields if the database_table_exists
+          validate_option_fields!(fields) if database_table_exists?
           
           # Define tsearch_config as a class inheritable attribute, so that
           # subclasses inherit it and can optionally override it.
